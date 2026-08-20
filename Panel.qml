@@ -8,8 +8,8 @@ import "Model.js" as Model
 
 Panel {
   id: root
-  moduleName: "io.gitlab.skotev.mounted-drives"
-  ipcTarget: "io.gitlab.skotev.mounted-drives"
+  moduleName: "io.github.sktev.mounted-drives"
+  ipcTarget: "io.github.sktev.mounted-drives"
 
   property var drives: []
   property string errorText: ""

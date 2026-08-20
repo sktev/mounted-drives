@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "id": "io.gitlab.skotev.mounted-drives",
+  "id": "io.github.sktev.mounted-drives",
   "name": "Mounted Drives",
   "version": "1.0.0",
-  "author": "skotev",
+  "author": "sktev",
   "license": "MIT",
   "description": "External drives in the bar: mount, unmount, eject, and open USB/CDROM/NVMe drives.",
   "kinds": ["bar-widget"],
