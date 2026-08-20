@@ -110,23 +110,26 @@ Panel {
   // Unlock a LUKS partition. udisksctl only reads the key from a real file
   // (no stdin, no tty here), so the passphrase is staged as a 0600 file in
   // the RAM-backed runtime dir and removed immediately via trap — it never
-  // touches persistent storage. The passphrase travels as an argv element,
-  // never through shell interpolation. udisksctl reports the mapper on
-  // stdout ("Unlocked /dev/sdb1 as /dev/dm-0.") — mount THAT, since
-  // mounting the backing partition is refused even after unlock.
+  // touches persistent storage. The passphrase rides stdin (actionProc
+  // writes it on start), never argv and never shell interpolation:
+  // /proc/<pid>/cmdline is readable by same-user processes. udisksctl
+  // reports the mapper on stdout ("Unlocked /dev/sdb1 as /dev/dm-0.") —
+  // mount THAT, since mounting the backing partition is refused even
+  // after unlock.
   function unlockDevice(leaf, passphrase) {
     if (root.busyDev !== "") return
     root.busyDev = leaf.path
     root.busyOp = "unlock"
     root.actionError = { dev: "", msg: "" }
     var script = 'keyfile="${XDG_RUNTIME_DIR:-/dev/shm}/mounted.drives.$$.key"'
-      + '; umask 077'
-      + '; printf %s "$1" > "$keyfile"'
+      + '; IFS= read -r pass'
+      + '; umask 077; printf %s "$pass" > "$keyfile"'
       + '; trap \'rm -f "$keyfile"\' EXIT'
       + '; out=$(udisksctl unlock -b ' + leaf.path + ' --key-file "$keyfile")'
       + ' && mapper=$(printf %s "$out" | sed -n "s/.* as //; s/[. ]*$//p")'
       + ' && [ -n "$mapper" ] && udisksctl mount -b "$mapper"'
-    actionProc.command = ["bash", "-c", script, "unlock", passphrase]
+    actionProc.stdinSecret = passphrase
+    actionProc.command = ["bash", "-c", script]
     actionProc.running = true
   }
 
@@ -190,6 +193,17 @@ Panel {
   Process {
     id: actionProc
     command: []
+    // LUKS passphrases ride stdin, never argv: /proc/<pid>/cmdline is
+    // readable by same-user processes. write() fires once the process
+    // starts; the unlock script consumes it with `IFS= read -r`.
+    property string stdinSecret: ""
+    stdinEnabled: true
+    onStarted: {
+      if (stdinSecret !== "") {
+        write(stdinSecret + "\n")
+        stdinSecret = ""
+      }
+    }
     // udisksctl prints success messages ("Unmounted /dev/sda1.") to stdout —
     // that's not an error, so stdout is ignored and only stderr is shown.
     stdout: StdioCollector {
@@ -272,7 +286,7 @@ Panel {
     fixedHeight: root.bar && root.bar.vertical ? Style.space(26) : -1
     tooltipText: {
       var parts = []
-      for (var i = 0; i < root.drives.length; i++) parts.push(Model.diskTitle(root.drives[i]))
+      for (var i = 0; i < root.drives.length; i++) parts.push(Model.htmlEscape(Model.diskTitle(root.drives[i])))
       if (parts.length === 0) return ""
       if (root.mountedCount > 0) parts.push(root.mountedCount + " mounted")
       return parts.join(" · ")
@@ -396,6 +410,7 @@ Panel {
 
                 Text {
                   text: Model.compactTitle(modelData)
+                  textFormat: Text.PlainText
                   color: root.fg
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.body
@@ -404,6 +419,7 @@ Panel {
 
                 Text {
                   text: Model.leafCaption(compactRow.child)
+                  textFormat: Text.PlainText
                   color: compactRow.child.mountpoints.length > 0 ? root.dim : root.fg
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.caption
@@ -413,6 +429,7 @@ Panel {
                   visible: root.actionError.dev === compactRow.child.path
                     || root.actionError.dev === modelData.path
                   text: root.actionError.msg
+                  textFormat: Text.PlainText
                   color: root.err
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.caption
@@ -473,7 +490,7 @@ Panel {
                   && !root.busyFor(compactRow.child.path)
                   && !root.busyFor(modelData.path)
                 text: ""
-                tooltipText: "Open " + compactRow.child.mountpoints[0]
+                tooltipText: "Open " + Model.htmlEscape(compactRow.child.mountpoints[0])
                 foreground: root.fg
                 fontFamily: root.fontFamily
                 fontSize: Style.font.caption
@@ -503,7 +520,7 @@ Panel {
                   && !root.busyFor(compactRow.child.path)
                   && !root.busyFor(modelData.path)
                 text: ""
-                tooltipText: "Lock " + compactRow.child.name
+                tooltipText: "Lock " + Model.htmlEscape(compactRow.child.name)
                 foreground: root.fg
                 fontFamily: root.fontFamily
                 fontSize: Style.font.caption
@@ -516,7 +533,7 @@ Panel {
                 visible: (modelData.kind === "usb" || modelData.kind === "cdrom")
                   && !root.busyFor(modelData.path)
                 text: ""
-                tooltipText: "Safely remove " + modelData.name
+                tooltipText: "Safely remove " + Model.htmlEscape(modelData.name)
                 foreground: root.fg
                 fontFamily: root.fontFamily
                 fontSize: Style.font.caption
@@ -557,6 +574,7 @@ Panel {
 
                   Text {
                     text: Model.diskTitle(modelData)
+                    textFormat: Text.PlainText
                     color: root.fg
                     font.family: root.fontFamily
                     font.pixelSize: Style.font.body
@@ -565,6 +583,7 @@ Panel {
 
                   Text {
                     text: modelData.size + " · " + Model.kindLabel(modelData.kind)
+                    textFormat: Text.PlainText
                     color: root.dim
                     font.family: root.fontFamily
                     font.pixelSize: Style.font.caption
@@ -584,7 +603,7 @@ Panel {
                   visible: (modelData.kind === "usb" || modelData.kind === "cdrom")
                     && !root.busyFor(modelData.path)
                   text: ""
-                  tooltipText: "Safely remove " + modelData.name
+                  tooltipText: "Safely remove " + Model.htmlEscape(modelData.name)
                   foreground: root.fg
                   fontFamily: root.fontFamily
                   fontSize: Style.font.caption
@@ -597,6 +616,7 @@ Panel {
               Text {
                 visible: root.actionError.dev === modelData.path
                 text: root.actionError.msg
+                textFormat: Text.PlainText
                 color: root.err
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.caption
@@ -631,6 +651,7 @@ Panel {
 
                       Text {
                         text: modelData.label ? modelData.label + " (" + modelData.name + ")" : modelData.name
+                        textFormat: Text.PlainText
                         color: root.fg
                         font.family: root.fontFamily
                         font.pixelSize: Style.font.bodySmall
@@ -638,6 +659,7 @@ Panel {
 
                       Text {
                         text: Model.leafCaption(modelData)
+                        textFormat: Text.PlainText
                         color: modelData.mountpoints.length > 0 ? root.dim : root.fg
                         font.family: root.fontFamily
                         font.pixelSize: Style.font.caption
@@ -646,6 +668,7 @@ Panel {
                       Text {
                         visible: root.actionError.dev === modelData.path
                         text: root.actionError.msg
+                        textFormat: Text.PlainText
                         color: root.err
                         font.family: root.fontFamily
                         font.pixelSize: Style.font.caption
@@ -702,7 +725,7 @@ Panel {
                     Button {
                       visible: (!modelData.encrypted || modelData.unlocked) && modelData.mountpoints.length > 0 && !root.busyFor(modelData.path)
                       text: ""
-                      tooltipText: "Open " + modelData.mountpoints[0]
+                      tooltipText: "Open " + Model.htmlEscape(modelData.mountpoints[0])
                       foreground: root.fg
                       fontFamily: root.fontFamily
                       fontSize: Style.font.caption
@@ -728,7 +751,7 @@ Panel {
                     Button {
                       visible: modelData.encrypted && modelData.unlocked && !root.busyFor(modelData.path)
                       text: ""
-                      tooltipText: "Lock " + modelData.name
+                      tooltipText: "Lock " + Model.htmlEscape(modelData.name)
                       foreground: root.fg
                       fontFamily: root.fontFamily
                       fontSize: Style.font.caption
@@ -772,6 +795,7 @@ Panel {
           visible: root.errorText !== ""
           Layout.fillWidth: true
           text: root.errorText
+          textFormat: Text.PlainText
           color: root.err
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption

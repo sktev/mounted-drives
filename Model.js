@@ -64,3 +64,14 @@ function leafCaption(leaf) {
   if (leaf.encrypted) return leaf.size + " · LUKS · locked"
   return leaf.size + " · " + leaf.fstype + " · not mounted"
 }
+
+// Escape a udev-provided string for the few surfaces that still parse rich
+// text (bar/button tooltips): labels and device names are attacker-
+// controlled, so markup like <img src=...> must not survive. Text elements
+// take the raw string and use textFormat: Text.PlainText instead.
+function htmlEscape(s) {
+  return String(s == null ? "" : s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+}
